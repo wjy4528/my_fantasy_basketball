@@ -59,6 +59,33 @@ def build_stat_id_map(stat_categories):
     return stat_map
 
 
+def build_reverse_stat_map(stat_id_map):
+    """
+    Build a reverse mapping: display_name -> stat_id.
+
+    Uses the API-provided stat_id_map first, then falls back to
+    hardcoded defaults for any missing entries.
+
+    Args:
+        stat_id_map: dict mapping stat_id -> display_name from API
+
+    Returns:
+        dict: Mapping of display_name (str) to stat_id (str)
+    """
+    reverse_map = {}
+    for sid, dname in stat_id_map.items():
+        reverse_map[dname] = sid
+    for sid, dname in ROTO_STAT_NAMES.items():
+        if dname not in reverse_map:
+            reverse_map[dname] = sid
+    for sid, dname in COMPONENT_STAT_NAMES.items():
+        if dname not in reverse_map:
+            reverse_map[dname] = sid
+    if 'GP' not in reverse_map:
+        reverse_map['GP'] = GP_STAT_ID
+    return reverse_map
+
+
 def format_stat_value(stat_id, value):
     """Format a stat value for display based on its type."""
     if stat_id in ('5', '8'):  # FG%, FT% are percentages
@@ -84,6 +111,7 @@ def main():
         # Get raw stat categories with stat_ids from the API
         raw_categories = client.get_stat_categories_raw()
         stat_id_map = build_stat_id_map(raw_categories)
+        reverse_stat_map = build_reverse_stat_map(stat_id_map)
 
         # Build Roto stat IDs from API categories (non-display-only stats)
         roto_stat_ids = []
@@ -154,33 +182,33 @@ def main():
                         'team': editorial_team,
                     }
 
-            # Fetch season stats (raw — includes ALL stat IDs)
+            # Fetch season stats via library method (augmented stats_id_map
+            # ensures GP, FGM, FGA, FTM, FTA are included)
             player_season_stats = {}
             if player_keys:
                 try:
-                    stats_response = client.get_players_stats_all(
+                    stats_response = client.get_players_stats(
                         player_keys, 'season')
-                    for ps in stats_response:
-                        pid = ps.get('player_id', '')
-                        if pid and pid in player_info:
-                            pstats = {str(k): v for k, v in ps.items()
-                                      if k not in ('player_id', 'name',
-                                                    'position_type')
-                                      and isinstance(v, (int, float))}
-                            player_season_stats[pid] = pstats
-                        elif pid:
-                            pname = ps.get('name', '')
-                            for k, v in player_info.items():
-                                if v['name'] == pname:
-                                    pstats = {str(sk): sv
-                                              for sk, sv in ps.items()
-                                              if sk not in ('player_id',
-                                                            'name',
-                                                            'position_type')
-                                              and isinstance(sv,
-                                                             (int, float))}
-                                    player_season_stats[k] = pstats
-                                    break
+                    if isinstance(stats_response, list):
+                        for ps in stats_response:
+                            pid = ps.get('player_id', '')
+                            if not pid:
+                                continue
+                            # Convert display-name keys to stat_id keys
+                            pstats = {}
+                            for key, value in ps.items():
+                                if (key in reverse_stat_map
+                                        and isinstance(value, (int, float))):
+                                    pstats[reverse_stat_map[key]] = value
+                            if pid in player_info:
+                                player_season_stats[pid] = pstats
+                            else:
+                                # Try match by name
+                                pname = ps.get('name', '')
+                                for k, v in player_info.items():
+                                    if v['name'] == pname:
+                                        player_season_stats[k] = pstats
+                                        break
                 except Exception as e:
                     print(f"     ⚠ Could not fetch player stats: {e}")
 

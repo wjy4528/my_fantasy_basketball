@@ -122,6 +122,13 @@ class LeagueData:
         for sid, dname in DEFAULT_ROTO_STATS.items():
             if dname not in self.reverse_stat_map:
                 self.reverse_stat_map[dname] = sid
+        # Add extra stats (GP, FGM, FGA, FTM, FTA) used for calculations
+        for int_id, dname in FantasyBasketballClient.EXTRA_NBA_STATS.items():
+            sid = str(int_id)
+            if sid not in self.stat_id_map:
+                self.stat_id_map[sid] = dname
+            if dname not in self.reverse_stat_map:
+                self.reverse_stat_map[dname] = sid
 
     def fetch_standings(self):
         """
@@ -190,12 +197,13 @@ class LeagueData:
 
     def fetch_player_stats(self):
         """
-        Fetch season stats for all rostered players using the raw API.
+        Fetch season stats for all rostered players.
 
-        Uses ``get_players_stats_all()`` which returns ALL stat IDs
-        (including GP, FGM, FGA, FTM, FTA) keyed by stat_id strings.
+        Uses the library's ``player_stats()`` method (with augmented
+        ``stats_id_map``) which returns ALL stat IDs including GP, FGM,
+        FGA, FTM, FTA keyed by display name.
 
-        Populates self.player_stats with {player_key: {stat_id: value}}.
+        Populates self.player_stats with {player_id: {stat_id: value}}.
         After fetching, computes team_stats by summing player totals.
         """
         self.player_stats = {}
@@ -206,20 +214,20 @@ class LeagueData:
                 continue
 
             try:
-                stats_response = self.client.get_players_stats_all(
+                stats_response = self.client.get_players_stats(
                     player_keys, 'season')
-                for ps in stats_response:
-                    pid = ps.get('player_id', '')
-                    if not pid:
-                        continue
-                    # Extract stat_id-keyed values only
-                    pstats = {}
-                    for k, v in ps.items():
-                        if k not in ('player_id', 'name',
-                                     'position_type', 'total_points'):
-                            if isinstance(v, (int, float)):
-                                pstats[str(k)] = v
-                    self.player_stats[pid] = pstats
+                if isinstance(stats_response, list):
+                    for ps in stats_response:
+                        pid = ps.get('player_id', '')
+                        if not pid:
+                            continue
+                        # Convert display-name-keyed stats to stat_id-keyed
+                        pstats = {}
+                        for key, value in ps.items():
+                            if key in self.reverse_stat_map and isinstance(
+                                    value, (int, float)):
+                                pstats[self.reverse_stat_map[key]] = value
+                        self.player_stats[pid] = pstats
             except Exception as e:
                 team_name = self.teams.get(team_key, team_key)
                 print(f"  Warning: Could not fetch player stats "

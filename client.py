@@ -13,6 +13,17 @@ load_dotenv()
 
 class FantasyBasketballClient:
     """Client for interacting with Yahoo Fantasy Basketball API"""
+
+    # Extra stat IDs that the library's stats_id_map doesn't include
+    # for NBA (it only includes scoring categories by default).
+    # These are needed for GP and FGM/FGA/FTM/FTA calculations.
+    EXTRA_NBA_STATS = {
+        0: 'GP',
+        3: 'FGM',
+        4: 'FGA',
+        6: 'FTM',
+        7: 'FTA',
+    }
     
     def __init__(self, league_id=None):
         """
@@ -31,6 +42,14 @@ class FantasyBasketballClient:
         # Get the current season league key
         self.league_key = self._get_league_key()
         self.lg = league.League(self.oauth, self.league_key)
+
+        # Augment the library's stats_id_map so player_stats() returns
+        # ALL stat IDs (GP, FGM, FGA, FTM, FTA, etc.), not just scoring
+        # categories.  The library filters stats not in this map.
+        if self.lg.stats_id_map is not None:
+            for stat_id, name in self.EXTRA_NBA_STATS.items():
+                if stat_id not in self.lg.stats_id_map:
+                    self.lg.stats_id_map[stat_id] = name
     
     def _get_league_key(self):
         """

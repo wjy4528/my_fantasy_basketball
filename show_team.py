@@ -12,6 +12,7 @@ Usage:
 import argparse
 import sys
 from client import FantasyBasketballClient
+from show_rosters import build_stat_id_map, build_reverse_stat_map
 
 
 # Standard Roto stat categories
@@ -138,16 +139,23 @@ def main():
                 player_info[pkey] = {
                     'name': pname, 'position': str(pos), 'team': eteam}
 
-        # Fetch all stats (raw)
-        stats_response = client.get_players_stats_all(player_keys, 'season')
+        # Build reverse mapping using shared utility
+        reverse_stat_map = build_reverse_stat_map(stat_id_map)
+
+        # Fetch stats via library method (augmented stats_id_map includes
+        # GP, FGM, FGA, FTM, FTA)
+        stats_response = client.get_players_stats(player_keys, 'season')
         player_stats = {}
-        for ps in stats_response:
-            pid = ps.get('player_id', '')
-            if pid:
-                pstats = {str(k): v for k, v in ps.items()
-                          if k not in ('player_id', 'name', 'position_type')
-                          and isinstance(v, (int, float))}
-                player_stats[pid] = pstats
+        if isinstance(stats_response, list):
+            for ps in stats_response:
+                pid = ps.get('player_id', '')
+                if pid:
+                    pstats = {}
+                    for key, value in ps.items():
+                        if (key in reverse_stat_map
+                                and isinstance(value, (int, float))):
+                            pstats[reverse_stat_map[key]] = value
+                    player_stats[pid] = pstats
 
         # Build header names
         headers = []
