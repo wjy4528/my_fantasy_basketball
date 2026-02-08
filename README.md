@@ -155,8 +155,27 @@ python show_rosters.py
 **Output includes:**
 - All teams and their full rosters
 - Each player's position and NBA team
+- Games Played (GP) and Games Left (GL) out of 82
+- FGM/FGA and FTM/FTA alongside FG% and FT%
 - Season total stats for each Roto category (FG%, FT%, 3PTM, PTS, REB, AST, STL, BLK, TO)
-- Team totals per category
+- Team totals per category (with FG%/FT% recalculated from components)
+
+### Export All Data for AI Analysis
+
+Export all league data (rosters, player stats, team stats) as a single JSON file
+that you can feed into an AI assistant (ChatGPT, Claude, etc.) for trade proposals:
+
+```bash
+python export_data.py
+python export_data.py --output my_league.json
+```
+
+**Output includes:**
+- All teams with rosters and player season stats
+- Games played and games remaining per player
+- FGM/FGA and FTM/FTA component stats
+- Team totals and stat category metadata
+- Stat ID mapping and negative stat indicators
 
 ### Roto Analyzer (Full Trade Engine)
 

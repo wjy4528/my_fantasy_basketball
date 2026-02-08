@@ -271,7 +271,8 @@ class TestShowRostersHelpers(unittest.TestCase):
         import types
         cls._mock_modules = {}
         for mod_name in ['yahoo_oauth', 'yahoo_fantasy_api', 'yahoo_fantasy_api.league',
-                         'yahoo_fantasy_api.game', 'yahoo_fantasy_api.team', 'dotenv']:
+                         'yahoo_fantasy_api.game', 'yahoo_fantasy_api.team', 'dotenv',
+                         'objectpath']:
             if mod_name not in sys.modules:
                 cls._mock_modules[mod_name] = sys.modules.get(mod_name)
                 sys.modules[mod_name] = types.ModuleType(mod_name)
@@ -279,6 +280,7 @@ class TestShowRostersHelpers(unittest.TestCase):
         # Add required attributes
         sys.modules['yahoo_oauth'].OAuth2 = MagicMock
         sys.modules['dotenv'].load_dotenv = lambda: None
+        sys.modules['objectpath'].Tree = MagicMock
 
     @classmethod
     def tearDownClass(cls):
@@ -297,6 +299,26 @@ class TestShowRostersHelpers(unittest.TestCase):
         result = build_stat_id_map(categories)
         self.assertEqual(result['12'], 'PTS')
         self.assertEqual(result['15'], 'REB')
+
+    def test_build_reverse_stat_map_from_api(self):
+        """Reverse map should use API display names."""
+        from show_rosters import build_reverse_stat_map
+        stat_id_map = {'17': 'ST', '12': 'PTS'}
+        reverse = build_reverse_stat_map(stat_id_map)
+        self.assertEqual(reverse['ST'], '17')
+        self.assertEqual(reverse['PTS'], '12')
+        # Defaults should fill in missing entries
+        self.assertIn('FG%', reverse)
+
+    def test_build_reverse_stat_map_api_overrides_default(self):
+        """API name 'ST' should take priority; default 'STL' is also added."""
+        from show_rosters import build_reverse_stat_map
+        stat_id_map = {'17': 'ST'}
+        reverse = build_reverse_stat_map(stat_id_map)
+        # API name maps correctly
+        self.assertEqual(reverse['ST'], '17')
+        # Default 'STL' still maps to 17 since it's not in API names
+        self.assertEqual(reverse['STL'], '17')
 
     def test_format_stat_value_percentage(self):
         from show_rosters import format_stat_value
@@ -352,6 +374,20 @@ class TestShowRostersHelpers(unittest.TestCase):
         self.assertAlmostEqual(stats['15'], 10.0)
         self.assertAlmostEqual(stats['5'], 0.456)
 
+    def test_extract_player_stats_flat_format_alternate_names(self):
+        """Yahoo API may use 'ST' instead of 'STL' for steals."""
+        from show_rosters import extract_player_stats
+        reverse_map = {'ST': '17', 'PTS': '12'}
+        player = {
+            'player_id': 6743,
+            'name': 'Test Player',
+            'ST': 50.0,
+            'PTS': 25.0,
+        }
+        name, stats = extract_player_stats(player, reverse_stat_map=reverse_map)
+        self.assertAlmostEqual(stats['17'], 50.0)
+        self.assertAlmostEqual(stats['12'], 25.0)
+
     def test_extract_player_stats_flat_format_no_reverse_map(self):
         """Without reverse_stat_map, flat format stats are not extracted."""
         from show_rosters import extract_player_stats
@@ -377,6 +413,70 @@ class TestShowRostersHelpers(unittest.TestCase):
         }
         name, stats = extract_player_stats(player, reverse_stat_map=reverse_map)
         self.assertEqual(name, 'Test Player')
+        self.assertAlmostEqual(stats['12'], 30.0)
+
+
+class TestLeagueDataExtractStats(unittest.TestCase):
+    """Test LeagueData._extract_stats with flat format."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Mock external modules so league_data can be imported."""
+        import types
+        cls._mock_modules = {}
+        for mod_name in ['yahoo_oauth', 'yahoo_fantasy_api', 'yahoo_fantasy_api.league',
+                         'yahoo_fantasy_api.game', 'yahoo_fantasy_api.team', 'dotenv',
+                         'objectpath']:
+            if mod_name not in sys.modules:
+                cls._mock_modules[mod_name] = sys.modules.get(mod_name)
+                sys.modules[mod_name] = types.ModuleType(mod_name)
+
+        sys.modules['yahoo_oauth'].OAuth2 = MagicMock
+        sys.modules['dotenv'].load_dotenv = lambda: None
+        sys.modules['objectpath'].Tree = MagicMock
+
+    @classmethod
+    def tearDownClass(cls):
+        for mod_name, original in cls._mock_modules.items():
+            if original is None:
+                sys.modules.pop(mod_name, None)
+            else:
+                sys.modules[mod_name] = original
+
+    def _make_ld(self):
+        """Create a LeagueData-like object with reverse_stat_map set."""
+        from league_data import LeagueData
+        # Patch __init__ to skip API connection
+        ld = LeagueData.__new__(LeagueData)
+        ld.reverse_stat_map = {'PTS': '12', 'REB': '15', 'ST': '17', 'GP': '0'}
+        return ld
+
+    def test_flat_format_extraction(self):
+        ld = self._make_ld()
+        player_data = {
+            'player_id': 123,
+            'name': 'Test Player',
+            'PTS': 25.0,
+            'REB': 10.0,
+            'ST': 2.0,
+            'GP': 50.0,
+        }
+        stats = ld._extract_stats(player_data)
+        self.assertAlmostEqual(stats['12'], 25.0)
+        self.assertAlmostEqual(stats['15'], 10.0)
+        self.assertAlmostEqual(stats['17'], 2.0)
+        self.assertAlmostEqual(stats['0'], 50.0)
+
+    def test_nested_format_still_works(self):
+        ld = self._make_ld()
+        player_data = {
+            'player_stats': {
+                'stats': [
+                    {'stat_id': '12', 'value': '30.0'},
+                ]
+            }
+        }
+        stats = ld._extract_stats(player_data)
         self.assertAlmostEqual(stats['12'], 30.0)
 
 

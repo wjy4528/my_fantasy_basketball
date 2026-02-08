@@ -26,7 +26,7 @@ ROTO_STAT_NAMES = {
     '19': 'TO',
 }
 
-# Additional stat IDs used for percentage calculations
+# Additional stat IDs used for percentage calculations and component display
 COMPONENT_STAT_NAMES = {
     '3': 'FGM',
     '4': 'FGA',
@@ -34,13 +34,20 @@ COMPONENT_STAT_NAMES = {
     '7': 'FTA',
 }
 
+# Games played stat
+GP_STAT_ID = '0'
+GP_DISPLAY_NAME = 'GP'
+
+# NBA regular season games per team
+NBA_TOTAL_GAMES = 82
+
 
 def build_stat_id_map(stat_categories):
     """
-    Build a mapping of stat_id to display_name from league settings.
+    Build a mapping of stat_id to display_name from raw API stat categories.
 
     Args:
-        stat_categories: List of stat category dicts from league settings
+        stat_categories: List of stat category dicts from raw API settings
 
     Returns:
         dict: Mapping of stat_id (str) to display_name (str)
@@ -51,6 +58,36 @@ def build_stat_id_map(stat_categories):
         display_name = cat.get('display_name', f'Stat {stat_id}')
         stat_map[stat_id] = display_name
     return stat_map
+
+
+def build_reverse_stat_map(stat_id_map):
+    """
+    Build a reverse mapping: display_name -> stat_id.
+
+    Uses the API-provided stat_id_map first, then falls back to
+    hardcoded defaults for any missing entries.
+
+    Args:
+        stat_id_map: dict mapping stat_id -> display_name from API
+
+    Returns:
+        dict: Mapping of display_name (str) to stat_id (str)
+    """
+    reverse_map = {}
+    # API-provided names take priority
+    for sid, dname in stat_id_map.items():
+        reverse_map[dname] = sid
+    # Add defaults for any missing entries
+    for sid, dname in ROTO_STAT_NAMES.items():
+        if dname not in reverse_map:
+            reverse_map[dname] = sid
+    for sid, dname in COMPONENT_STAT_NAMES.items():
+        if dname not in reverse_map:
+            reverse_map[dname] = sid
+    # GP
+    if GP_DISPLAY_NAME not in reverse_map:
+        reverse_map[GP_DISPLAY_NAME] = GP_STAT_ID
+    return reverse_map
 
 
 def extract_player_stats(player, reverse_stat_map=None):
@@ -126,35 +163,38 @@ def main():
         print("Connecting to Yahoo Fantasy Basketball API...")
         client = FantasyBasketballClient()
 
-        print(f"\n{'='*90}")
+        print(f"\n{'='*120}")
         print(f"  Rosters & Player Stats (Season 2025-2026) - League ID: {client.league_id}")
-        print(f"{'='*90}")
+        print(f"{'='*120}")
 
-        # Get league settings for stat category names
-        settings = client.get_league_settings()
-        stat_categories = settings.get('stat_categories', {}).get('stats', [])
-        stat_id_map = build_stat_id_map(stat_categories)
+        # Get raw stat categories with stat_ids from the API
+        raw_categories = client.get_stat_categories_raw()
+        stat_id_map = build_stat_id_map(raw_categories)
+        reverse_stat_map = build_reverse_stat_map(stat_id_map)
 
-        # Determine which stat IDs to display (use league settings or defaults)
-        display_stat_ids = []
-        for cat in stat_categories:
+        # Determine which stat IDs to display:
+        # GP first, then component stats (FGM/FGA, FTM/FTA) next to percentages,
+        # then the Roto scoring categories
+        display_stat_ids = [GP_STAT_ID]
+
+        # Build Roto stat IDs from API categories (non-display-only stats)
+        roto_stat_ids = []
+        for cat in raw_categories:
             sid = str(cat.get('stat_id', ''))
-            if sid:
+            is_display_only = str(cat.get('is_only_display_stat', '0'))
+            if sid and is_display_only != '1':
+                roto_stat_ids.append(sid)
+        if not roto_stat_ids:
+            roto_stat_ids = list(ROTO_STAT_NAMES.keys())
+
+        # Insert component stats next to their percentage stats
+        for sid in roto_stat_ids:
+            if sid == '5':  # FG%
+                display_stat_ids.extend(['3', '4', '5'])  # FGM, FGA, FG%
+            elif sid == '8':  # FT%
+                display_stat_ids.extend(['6', '7', '8'])  # FTM, FTA, FT%
+            elif sid not in ('3', '4', '6', '7'):  # Skip component IDs already added
                 display_stat_ids.append(sid)
-
-        if not display_stat_ids:
-            display_stat_ids = list(ROTO_STAT_NAMES.keys())
-
-        # Build reverse mapping: display_name -> stat_id for flat API responses
-        reverse_stat_map = {}
-        for sid, dname in stat_id_map.items():
-            reverse_stat_map[dname] = sid
-        for sid, dname in ROTO_STAT_NAMES.items():
-            if dname not in reverse_stat_map:
-                reverse_stat_map[dname] = sid
-        for sid, dname in COMPONENT_STAT_NAMES.items():
-            if dname not in reverse_stat_map:
-                reverse_stat_map[dname] = sid
 
         # Get all teams
         teams = client.get_teams()
@@ -163,18 +203,21 @@ def main():
             print("\nNo teams found in the league.")
             sys.exit(0)
 
-        # Build stat header
+        # Build stat header using API display names
         stat_headers = []
         for sid in display_stat_ids:
-            name = stat_id_map.get(sid, ROTO_STAT_NAMES.get(sid, f'S{sid}'))
+            name = stat_id_map.get(sid,
+                                   ROTO_STAT_NAMES.get(sid,
+                                   COMPONENT_STAT_NAMES.get(sid,
+                                   GP_DISPLAY_NAME if sid == GP_STAT_ID else f'S{sid}')))
             stat_headers.append(name)
 
         # Process each team
         for team_key, team_name in teams.items():
-            print(f"\n{'─'*90}")
+            print(f"\n{'─'*120}")
             print(f"  📋 {team_name}")
             print(f"     Team Key: {team_key}")
-            print(f"{'─'*90}")
+            print(f"{'─'*120}")
 
             # Get roster
             try:
@@ -244,11 +287,12 @@ def main():
             header = f"  {'Player':<28} {'Pos':<6} {'Team':<5}"
             for sh in stat_headers:
                 header += f" {sh:>7}"
+            header += f" {'GL':>4}"
             print(header)
             print(f"  {'─'*28} {'─'*5} {'─'*4}", end="")
             for _ in stat_headers:
                 print(f" {'─'*7}", end="")
-            print()
+            print(f" {'─'*4}")
 
             # Print each player with stats
             team_totals = {}
@@ -271,6 +315,14 @@ def main():
                             )
                     else:
                         row += f" {'—':>7}"
+
+                # Games left column
+                gp = pstats.get(GP_STAT_ID, '-')
+                if gp != '-' and isinstance(gp, (int, float)):
+                    games_left = NBA_TOTAL_GAMES - int(gp)
+                    row += f" {games_left:>4}"
+                else:
+                    row += f" {'—':>4}"
                 print(row)
 
             # Print team totals
@@ -278,22 +330,33 @@ def main():
                 print(f"  {'─'*28} {'─'*5} {'─'*4}", end="")
                 for _ in stat_headers:
                     print(f" {'─'*7}", end="")
-                print()
+                print(f" {'─'*4}")
                 totals_row = f"  {'TEAM TOTALS':<28} {'':6} {'':5}"
                 for sid in display_stat_ids:
                     if sid in ('5', '8'):
-                        totals_row += f" {'—':>7}"
+                        # Recalculate percentages from components
+                        if sid == '5' and '3' in team_totals and '4' in team_totals:
+                            fgpct = team_totals['3'] / team_totals['4'] if team_totals['4'] > 0 else 0
+                            totals_row += f" {format_stat_value(sid, fgpct):>7}"
+                        elif sid == '8' and '6' in team_totals and '7' in team_totals:
+                            ftpct = team_totals['6'] / team_totals['7'] if team_totals['7'] > 0 else 0
+                            totals_row += f" {format_stat_value(sid, ftpct):>7}"
+                        else:
+                            totals_row += f" {'—':>7}"
                     elif sid in team_totals:
                         totals_row += f" {format_stat_value(sid, team_totals[sid]):>7}"
                     else:
                         totals_row += f" {'—':>7}"
+                totals_row += f" {'':>4}"
                 print(totals_row)
 
-        print(f"\n{'='*90}")
+        print(f"\n{'='*120}")
         print("  Roto Scoring: Teams are ranked 1-N in each category.")
+        print("  GP = Games Played, GL = Games Left (out of 82)")
+        print("  FGM/FGA = Field Goals Made/Attempted, FTM/FTA = Free Throws Made/Attempted")
         print("  Categories: FG%, FT%, 3PTM, PTS, REB, AST, STL, BLK, TO")
         print("  Reference: https://help.yahoo.com/kb/rotisserie-scoring-sln6187.html")
-        print(f"{'='*90}\n")
+        print(f"{'='*120}\n")
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)

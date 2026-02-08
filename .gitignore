@@ -38,3 +38,6 @@ ENV/
 
 # OAuth tokens
 oauth2.json
+
+# Exported data
+league_export.json

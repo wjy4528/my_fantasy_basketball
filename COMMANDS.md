@@ -94,14 +94,39 @@ python show_rosters.py
 **What it shows:**
 - All teams and their full rosters
 - Each player's position and NBA team
+- Games Played (GP) and Games Left (GL) out of 82
+- FGM/FGA and FTM/FTA alongside FG% and FT%
 - Season total stats per Roto category (FG%, FT%, 3PTM, PTS, REB, AST, STL, BLK, TO)
-- Team totals per category (excluding percentage stats)
+- Team totals per category (with FG%/FT% recalculated from components)
 
 **Use case:** Quick overview of every roster's composition and statistical output. Essential for evaluating trade targets.
 
 ---
 
-### 5. Roto Analyzer (`roto_analyzer.py`)
+### 5. Export Data for AI Analysis (`export_data.py`)
+
+Exports all league data as a single JSON file for AI-assisted trade analysis.
+
+```bash
+python export_data.py
+python export_data.py --output my_league.json
+```
+
+**Options:**
+- `--output`, `-o`: Output file path (default: `league_export.json`)
+
+**What it shows:**
+- All teams with full rosters and player season stats
+- Games played and games remaining per player
+- FGM/FGA and FTM/FTA component stats
+- Team totals and stat category metadata
+- Stat ID mapping and negative stat indicators
+
+**Use case:** Feed the generated JSON into ChatGPT, Claude, or another AI assistant to get trade proposals, waiver wire suggestions, and strategy advice.
+
+---
+
+### 6. Roto Analyzer (`roto_analyzer.py`)
 
 Full Rotisserie league analysis with standings, safety margins, and automated trade suggestions.
 
@@ -133,7 +158,7 @@ python roto_analyzer.py --remaining-games 25 --top-trades 10
 
 ---
 
-### 6. Example API Usage (`example_usage.py`)
+### 7. Example API Usage (`example_usage.py`)
 
 Demonstrates how to use the client library programmatically.
 

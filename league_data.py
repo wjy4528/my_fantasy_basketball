@@ -34,6 +34,7 @@ class LeagueData:
     Attributes:
         client: FantasyBasketballClient instance
         stat_id_map: Mapping of stat_id to display name
+        reverse_stat_map: Mapping of display_name to stat_id (for flat API responses)
         roto_stat_ids: List of stat IDs used in Roto scoring
         teams: Dict of team_key -> team_name
         standings_raw: Raw standings data from API
@@ -52,6 +53,7 @@ class LeagueData:
         """
         self.client = FantasyBasketballClient(league_id)
         self.stat_id_map = {}
+        self.reverse_stat_map = {}
         self.roto_stat_ids = []
         self.negative_stats = set()  # Stats where lower is better (e.g., TO)
         self.teams = {}
@@ -72,16 +74,18 @@ class LeagueData:
         """
         Fetch league settings and build the stat_id to name mapping.
 
+        Uses get_stat_categories_raw() to get the actual stat_id -> display_name
+        mapping from the raw API (since settings() filters out stat_categories).
+
         Identifies which stats are used for Roto scoring and which
         stats are 'negative' (lower is better, like Turnovers).
         """
-        settings = self.client.get_league_settings()
-        stat_categories = settings.get('stat_categories', {}).get('stats', [])
+        raw_categories = self.client.get_stat_categories_raw()
 
         self.stat_id_map = {}
         self.roto_stat_ids = []
 
-        for cat in stat_categories:
+        for cat in raw_categories:
             stat_id = str(cat.get('stat_id', ''))
             display_name = cat.get('display_name', f'Stat {stat_id}')
             self.stat_id_map[stat_id] = display_name
@@ -101,6 +105,15 @@ class LeagueData:
             self.roto_stat_ids = list(DEFAULT_ROTO_STATS.keys())
             self.stat_id_map.update(DEFAULT_ROTO_STATS)
             self.negative_stats.add('19')  # TO
+
+        # Build reverse mapping: display_name -> stat_id for flat API responses
+        self.reverse_stat_map = {}
+        for sid, dname in self.stat_id_map.items():
+            self.reverse_stat_map[dname] = sid
+        # Add defaults for any missing entries
+        for sid, dname in DEFAULT_ROTO_STATS.items():
+            if dname not in self.reverse_stat_map:
+                self.reverse_stat_map[dname] = sid
 
     def fetch_standings(self):
         """
@@ -148,6 +161,8 @@ class LeagueData:
                 for player in roster:
                     pkey = player.get('player_key', '')
                     if not pkey:
+                        pkey = player.get('player_id', '')
+                    if not pkey:
                         continue
                     pname = player.get('name', 'Unknown')
                     if isinstance(pname, dict):
@@ -177,7 +192,7 @@ class LeagueData:
         self.player_stats = {}
 
         for team_key, roster in self.rosters.items():
-            player_keys = [p.get('player_key', '') for p in roster if p.get('player_key')]
+            player_keys = self.get_team_player_keys(team_key)
             if not player_keys:
                 continue
 
@@ -186,6 +201,8 @@ class LeagueData:
                 if isinstance(stats_response, list):
                     for ps in stats_response:
                         pkey = ps.get('player_key', '')
+                        if not pkey:
+                            pkey = ps.get('player_id', '')
                         pstats = self._extract_stats(ps)
                         if pkey:
                             self.player_stats[pkey] = pstats
@@ -200,6 +217,10 @@ class LeagueData:
     def _extract_stats(self, player_data):
         """
         Extract stat values from a player stats API response.
+
+        Handles two formats:
+        1. Nested: player_stats -> stats -> [{stat_id, value}]
+        2. Flat: stats as top-level keys by display name (yahoo_fantasy_api)
 
         Args:
             player_data: Player data dict from the API
@@ -228,12 +249,26 @@ class LeagueData:
                         stats[stat_id] = float(value)
                     except (ValueError, TypeError):
                         pass
+
+        # Handle flat format from yahoo_fantasy_api library
+        if not stats and self.reverse_stat_map:
+            for key, value in player_data.items():
+                if key in self.reverse_stat_map and isinstance(value, (int, float)):
+                    stats[self.reverse_stat_map[key]] = value
+
         return stats
 
     def get_team_player_keys(self, team_key):
         """Get all player keys for a given team."""
         roster = self.rosters.get(team_key, [])
-        return [p.get('player_key', '') for p in roster if p.get('player_key')]
+        keys = []
+        for p in roster:
+            pkey = p.get('player_key', '')
+            if not pkey:
+                pkey = p.get('player_id', '')
+            if pkey:
+                keys.append(pkey)
+        return keys
 
     def get_stat_name(self, stat_id):
         """Get display name for a stat_id."""

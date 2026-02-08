@@ -2,6 +2,7 @@
 Yahoo Fantasy Basketball API Client
 """
 import os
+import objectpath
 from yahoo_oauth import OAuth2
 from yahoo_fantasy_api import league, game, team
 from dotenv import load_dotenv
@@ -102,6 +103,25 @@ class FantasyBasketballClient:
             dict: League settings
         """
         return self.lg.settings()
+
+    def get_stat_categories_raw(self):
+        """
+        Get raw stat categories with stat_ids from the Yahoo API.
+
+        The library's ``settings()`` method filters out stat_categories,
+        so this method fetches them directly from the raw settings JSON.
+
+        Returns:
+            list: List of stat category dicts, each containing at least
+                  ``stat_id`` and ``display_name``.
+        """
+        raw = self.lg.yhandler.get_settings_raw(self.lg.league_id)
+        t = objectpath.Tree(raw)
+        categories = []
+        for s in t.execute('$..stat_categories..stat'):
+            if isinstance(s, dict) and 'stat_id' in s:
+                categories.append(s)
+        return categories
     
     def get_player_stats(self, player_key, req_type='season'):
         """
