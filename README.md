@@ -6,8 +6,12 @@ A Python-based analysis tool for Yahoo Fantasy Basketball that helps you make da
 
 - Fetch league data from Yahoo Fantasy Sports API
 - View all teams in your league
+- **View rosters for every manager** with player season stats (2025-2026)
 - Analyze team statistics and standings
 - Get trade suggestions based on team strengths and weaknesses
+- **Full Rotisserie (Roto) scoring analysis** with per-category rankings
+- **Standings gaps & safety margins** to identify easiest rank improvements
+- **Trade simulation engine** that projects rest-of-season impact and suggests optimal 1-for-1 trades
 - No UI required - simple command-line tools
 
 ## Prerequisites
@@ -139,6 +143,37 @@ Based on complementary team needs, here are potential trade partners:
      - Rebounds (REB)
      - Blocks (BLK)
 ```
+
+### Show Rosters with Player Stats
+
+Display every manager's roster with each player's total season stats (2025-2026):
+
+```bash
+python show_rosters.py
+```
+
+**Output includes:**
+- All teams and their full rosters
+- Each player's position and NBA team
+- Season total stats for each Roto category (FG%, FT%, 3PTM, PTS, REB, AST, STL, BLK, TO)
+- Team totals per category
+
+### Roto Analyzer (Full Trade Engine)
+
+Run the complete Rotisserie analysis with standings, safety margins, and trade simulation:
+
+```bash
+python roto_analyzer.py
+python roto_analyzer.py --team-key 428.l.21454.t.1
+python roto_analyzer.py --remaining-games 25 --top-trades 10
+```
+
+**Output includes:**
+- Full Roto standings with per-category rank points
+- Standings gaps and safety margins for your team
+- Simulated 1-for-1 trades ranked by Roto score improvement
+- Mutual benefit indicators for trade likelihood
+- Results in a Pandas DataFrame
 
 ## How Trade Suggestions Work
 
