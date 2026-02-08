@@ -155,10 +155,23 @@ python show_rosters.py
 **Output includes:**
 - All teams and their full rosters
 - Each player's position and NBA team
-- Games Played (GP) and Games Left (GL) out of 82
-- FGM/FGA and FTM/FTA alongside FG% and FT%
 - Season total stats for each Roto category (FG%, FT%, 3PTM, PTS, REB, AST, STL, BLK, TO)
-- Team totals per category (with FG%/FT% recalculated from components)
+- Team totals with FG%/FT% recalculated from FGM/FGA and FTM/FTA components
+- Team-level GP (Games Played) and GL (Games Left)
+
+### Show Team Detail
+
+Show detailed stats for a specific team including per-game averages:
+
+```bash
+python show_team.py
+python show_team.py --team-key 466.l.21454.t.1
+```
+
+**Output includes:**
+- Season totals with GP, FGM/FGA, FTM/FTA, and all Roto categories
+- Per-game averages for each player
+- Team totals and games remaining
 
 ### Export All Data for AI Analysis
 

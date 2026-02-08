@@ -77,13 +77,22 @@ def main():
                 'roster': [],
             }
 
-            # Team totals from standings
+            # Team totals (computed from player sums)
             team_stats = ld.team_stats.get(team_key, {})
             for sid in ld.roto_stat_ids:
                 stat_name = ld.get_stat_name(sid)
                 val = team_stats.get(sid)
                 if val is not None:
                     team_data['team_totals'][stat_name] = val
+            # Include GP and component stats in team totals
+            gp_total = team_stats.get('0')
+            if gp_total is not None:
+                team_data['team_totals']['GP'] = gp_total
+            for comp_id, comp_name in [('3', 'FGM'), ('4', 'FGA'),
+                                       ('6', 'FTM'), ('7', 'FTA')]:
+                val = team_stats.get(comp_id)
+                if val is not None:
+                    team_data['team_totals'][comp_name] = val
 
             # Player details
             player_keys = ld.get_team_player_keys(team_key)
@@ -92,29 +101,38 @@ def main():
                 pstats = ld.player_stats.get(pkey, {})
 
                 gp = pstats.get('0', 0)
-                games_left = NBA_TOTAL_GAMES - int(gp) if isinstance(gp, (int, float)) else None
+                games_left = (NBA_TOTAL_GAMES - int(gp)
+                              if isinstance(gp, (int, float)) else None)
 
                 player_entry = {
                     'player_id': pkey,
                     'name': info.get('name', 'Unknown'),
                     'position': info.get('position', 'N/A'),
                     'nba_team': info.get('team', ''),
-                    'games_played': int(gp) if isinstance(gp, (int, float)) else None,
+                    'games_played': (int(gp) if isinstance(gp, (int, float))
+                                     else None),
                     'games_left': games_left,
-                    'season_stats': {},
+                    'season_totals': {},
+                    'per_game_averages': {},
                 }
 
                 for sid in ld.roto_stat_ids:
                     stat_name = ld.get_stat_name(sid)
                     val = pstats.get(sid)
                     if val is not None:
-                        player_entry['season_stats'][stat_name] = val
+                        player_entry['season_totals'][stat_name] = val
+                        # Per-game averages (skip percentages)
+                        if (sid not in ('5', '8')
+                                and isinstance(gp, (int, float)) and gp > 0):
+                            player_entry['per_game_averages'][stat_name] = (
+                                round(val / gp, 2))
 
-                # Also include component stats (FGM, FGA, FTM, FTA)
-                for comp_id, comp_name in [('3', 'FGM'), ('4', 'FGA'), ('6', 'FTM'), ('7', 'FTA')]:
+                # Component stats
+                for comp_id, comp_name in [('3', 'FGM'), ('4', 'FGA'),
+                                           ('6', 'FTM'), ('7', 'FTA')]:
                     val = pstats.get(comp_id)
                     if val is not None:
-                        player_entry['season_stats'][comp_name] = val
+                        player_entry['season_totals'][comp_name] = val
 
                 team_data['roster'].append(player_entry)
 

@@ -190,10 +190,13 @@ class LeagueData:
 
     def fetch_player_stats(self):
         """
-        Fetch season average stats for all rostered players.
+        Fetch season stats for all rostered players using the raw API.
 
-        Uses batch requests per team to minimize API calls.
+        Uses ``get_players_stats_all()`` which returns ALL stat IDs
+        (including GP, FGM, FGA, FTM, FTA) keyed by stat_id strings.
+
         Populates self.player_stats with {player_key: {stat_id: value}}.
+        After fetching, computes team_stats by summing player totals.
         """
         self.player_stats = {}
 
@@ -203,20 +206,27 @@ class LeagueData:
                 continue
 
             try:
-                stats_response = self.client.get_players_stats(player_keys, 'season')
-                if isinstance(stats_response, list):
-                    for ps in stats_response:
-                        pkey = self._get_player_key(ps)
-                        pstats = self._extract_stats(ps)
-                        if pkey:
-                            self.player_stats[pkey] = pstats
-                elif isinstance(stats_response, dict):
-                    for pkey, ps in stats_response.items():
-                        pstats = self._extract_stats(ps)
-                        self.player_stats[pkey] = pstats
+                stats_response = self.client.get_players_stats_all(
+                    player_keys, 'season')
+                for ps in stats_response:
+                    pid = ps.get('player_id', '')
+                    if not pid:
+                        continue
+                    # Extract stat_id-keyed values only
+                    pstats = {}
+                    for k, v in ps.items():
+                        if k not in ('player_id', 'name',
+                                     'position_type', 'total_points'):
+                            if isinstance(v, (int, float)):
+                                pstats[str(k)] = v
+                    self.player_stats[pid] = pstats
             except Exception as e:
                 team_name = self.teams.get(team_key, team_key)
-                print(f"  Warning: Could not fetch player stats for {team_name}: {e}")
+                print(f"  Warning: Could not fetch player stats "
+                      f"for {team_name}: {e}")
+
+        # Compute team totals from player data
+        self._compute_team_stats()
 
     def _extract_stats(self, player_data):
         """
@@ -261,6 +271,35 @@ class LeagueData:
                     stats[self.reverse_stat_map[key]] = value
 
         return stats
+
+    def _compute_team_stats(self):
+        """
+        Compute team stat totals by summing each player's season stats.
+
+        For percentage stats (FG%, FT%), recalculates from components
+        (FGM/FGA, FTM/FTA) instead of averaging.
+        """
+        self.team_stats = {}
+        for team_key in self.teams:
+            player_keys = self.get_team_player_keys(team_key)
+            totals = {}
+            for pkey in player_keys:
+                pstats = self.player_stats.get(pkey, {})
+                for stat_id, val in pstats.items():
+                    if isinstance(val, (int, float)):
+                        # Skip percentage stats — recalculate from components
+                        if stat_id in ('5', '8'):
+                            continue
+                        totals[stat_id] = totals.get(stat_id, 0) + val
+
+            # Recalculate FG% from FGM/FGA
+            if '3' in totals and '4' in totals and totals['4'] > 0:
+                totals['5'] = totals['3'] / totals['4']
+            # Recalculate FT% from FTM/FTA
+            if '6' in totals and '7' in totals and totals['7'] > 0:
+                totals['8'] = totals['6'] / totals['7']
+
+            self.team_stats[team_key] = totals
 
     def get_team_player_keys(self, team_key):
         """Get all player keys for a given team."""

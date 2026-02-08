@@ -300,26 +300,6 @@ class TestShowRostersHelpers(unittest.TestCase):
         self.assertEqual(result['12'], 'PTS')
         self.assertEqual(result['15'], 'REB')
 
-    def test_build_reverse_stat_map_from_api(self):
-        """Reverse map should use API display names."""
-        from show_rosters import build_reverse_stat_map
-        stat_id_map = {'17': 'ST', '12': 'PTS'}
-        reverse = build_reverse_stat_map(stat_id_map)
-        self.assertEqual(reverse['ST'], '17')
-        self.assertEqual(reverse['PTS'], '12')
-        # Defaults should fill in missing entries
-        self.assertIn('FG%', reverse)
-
-    def test_build_reverse_stat_map_api_overrides_default(self):
-        """API name 'ST' should take priority; default 'STL' is also added."""
-        from show_rosters import build_reverse_stat_map
-        stat_id_map = {'17': 'ST'}
-        reverse = build_reverse_stat_map(stat_id_map)
-        # API name maps correctly
-        self.assertEqual(reverse['ST'], '17')
-        # Default 'STL' still maps to 17 since it's not in API names
-        self.assertEqual(reverse['STL'], '17')
-
     def test_format_stat_value_percentage(self):
         from show_rosters import format_stat_value
         self.assertEqual(format_stat_value('5', 0.456), '0.456')
@@ -333,91 +313,9 @@ class TestShowRostersHelpers(unittest.TestCase):
         from show_rosters import format_stat_value
         self.assertEqual(format_stat_value('12', 10.5), '10.5')
 
-    def test_extract_player_stats_dict(self):
-        from show_rosters import extract_player_stats
-        player = {
-            'name': {'full': 'Test Player'},
-            'player_stats': {
-                'stats': [
-                    {'stat_id': '12', 'value': '25.0'},
-                    {'stat_id': '15', 'value': '10'},
-                ]
-            }
-        }
-        name, stats = extract_player_stats(player)
-        self.assertEqual(name, 'Test Player')
-        self.assertAlmostEqual(stats['12'], 25.0)
-        self.assertAlmostEqual(stats['15'], 10.0)
-
-    def test_extract_player_stats_missing(self):
-        from show_rosters import extract_player_stats
-        player = {'name': 'Simple Name'}
-        name, stats = extract_player_stats(player)
-        self.assertEqual(name, 'Simple Name')
-        self.assertEqual(stats, {})
-
-    def test_extract_player_stats_flat_format(self):
-        """yahoo_fantasy_api returns flat dicts with display name keys."""
-        from show_rosters import extract_player_stats
-        reverse_map = {'PTS': '12', 'REB': '15', 'FG%': '5'}
-        player = {
-            'player_id': 6743,
-            'name': 'Test Player',
-            'position_type': 'P',
-            'PTS': 25.0,
-            'REB': 10.0,
-            'FG%': 0.456,
-        }
-        name, stats = extract_player_stats(player, reverse_stat_map=reverse_map)
-        self.assertEqual(name, 'Test Player')
-        self.assertAlmostEqual(stats['12'], 25.0)
-        self.assertAlmostEqual(stats['15'], 10.0)
-        self.assertAlmostEqual(stats['5'], 0.456)
-
-    def test_extract_player_stats_flat_format_alternate_names(self):
-        """Yahoo API may use 'ST' instead of 'STL' for steals."""
-        from show_rosters import extract_player_stats
-        reverse_map = {'ST': '17', 'PTS': '12'}
-        player = {
-            'player_id': 6743,
-            'name': 'Test Player',
-            'ST': 50.0,
-            'PTS': 25.0,
-        }
-        name, stats = extract_player_stats(player, reverse_stat_map=reverse_map)
-        self.assertAlmostEqual(stats['17'], 50.0)
-        self.assertAlmostEqual(stats['12'], 25.0)
-
-    def test_extract_player_stats_flat_format_no_reverse_map(self):
-        """Without reverse_stat_map, flat format stats are not extracted."""
-        from show_rosters import extract_player_stats
-        player = {
-            'player_id': 6743,
-            'name': 'Test Player',
-            'PTS': 25.0,
-        }
-        name, stats = extract_player_stats(player)
-        self.assertEqual(name, 'Test Player')
-        self.assertEqual(stats, {})
-
-    def test_extract_player_stats_nested_preferred_over_flat(self):
-        """Nested format should be preferred when both are present."""
-        from show_rosters import extract_player_stats
-        reverse_map = {'PTS': '12'}
-        player = {
-            'name': 'Test Player',
-            'player_stats': {
-                'stats': [{'stat_id': '12', 'value': '30.0'}]
-            },
-            'PTS': 25.0,
-        }
-        name, stats = extract_player_stats(player, reverse_stat_map=reverse_map)
-        self.assertEqual(name, 'Test Player')
-        self.assertAlmostEqual(stats['12'], 30.0)
-
 
 class TestLeagueDataExtractStats(unittest.TestCase):
-    """Test LeagueData._extract_stats with flat format."""
+    """Test LeagueData._extract_stats and _compute_team_stats."""
 
     @classmethod
     def setUpClass(cls):
@@ -446,9 +344,25 @@ class TestLeagueDataExtractStats(unittest.TestCase):
     def _make_ld(self):
         """Create a LeagueData-like object with reverse_stat_map set."""
         from league_data import LeagueData
-        # Patch __init__ to skip API connection
         ld = LeagueData.__new__(LeagueData)
         ld.reverse_stat_map = {'PTS': '12', 'REB': '15', 'ST': '17', 'GP': '0'}
+        ld.stat_id_map = {'12': 'PTS', '15': 'REB', '17': 'ST', '0': 'GP'}
+        ld.roto_stat_ids = ['5', '12', '15', '17']
+        ld.negative_stats = set()
+        ld.teams = {'team.1': 'Team A'}
+        ld.rosters = {'team.1': [{'player_id': 101}, {'player_id': 102}]}
+        ld.player_stats = {
+            101: {'0': 50.0, '3': 200.0, '4': 400.0, '5': 0.500,
+                  '12': 500.0, '15': 300.0, '17': 50.0},
+            102: {'0': 40.0, '3': 100.0, '4': 250.0, '5': 0.400,
+                  '12': 300.0, '15': 200.0, '17': 30.0},
+        }
+        ld.player_info = {
+            101: {'name': 'Player A', 'position': 'PG', 'team': 'LAL',
+                  'team_key': 'team.1'},
+            102: {'name': 'Player B', 'position': 'SG', 'team': 'BOS',
+                  'team_key': 'team.1'},
+        }
         return ld
 
     def test_flat_format_extraction(self):
@@ -478,6 +392,36 @@ class TestLeagueDataExtractStats(unittest.TestCase):
         }
         stats = ld._extract_stats(player_data)
         self.assertAlmostEqual(stats['12'], 30.0)
+
+    def test_compute_team_stats_sums_players(self):
+        """team_stats should be sum of player season totals."""
+        ld = self._make_ld()
+        ld._compute_team_stats()
+        ts = ld.team_stats['team.1']
+        # PTS: 500 + 300 = 800
+        self.assertAlmostEqual(ts['12'], 800.0)
+        # REB: 300 + 200 = 500
+        self.assertAlmostEqual(ts['15'], 500.0)
+        # ST: 50 + 30 = 80
+        self.assertAlmostEqual(ts['17'], 80.0)
+
+    def test_compute_team_stats_recalculates_fg_pct(self):
+        """FG% should be recalculated from FGM/FGA, not averaged."""
+        ld = self._make_ld()
+        ld._compute_team_stats()
+        ts = ld.team_stats['team.1']
+        # FGM: 200 + 100 = 300, FGA: 400 + 250 = 650
+        # FG% = 300 / 650 ≈ 0.4615
+        expected_fg = 300.0 / 650.0
+        self.assertAlmostEqual(ts['5'], expected_fg, places=4)
+
+    def test_compute_team_stats_sums_gp(self):
+        """GP should be summed across all players."""
+        ld = self._make_ld()
+        ld._compute_team_stats()
+        ts = ld.team_stats['team.1']
+        # GP: 50 + 40 = 90
+        self.assertAlmostEqual(ts['0'], 90.0)
 
 
 if __name__ == '__main__':

@@ -94,16 +94,34 @@ python show_rosters.py
 **What it shows:**
 - All teams and their full rosters
 - Each player's position and NBA team
-- Games Played (GP) and Games Left (GL) out of 82
-- FGM/FGA and FTM/FTA alongside FG% and FT%
 - Season total stats per Roto category (FG%, FT%, 3PTM, PTS, REB, AST, STL, BLK, TO)
-- Team totals per category (with FG%/FT% recalculated from components)
+- Team totals with FG%/FT% recalculated from FGM/FGA and FTM/FTA components
+- Team-level GP (Games Played) and GL (Games Left)
 
 **Use case:** Quick overview of every roster's composition and statistical output. Essential for evaluating trade targets.
 
 ---
 
-### 5. Export Data for AI Analysis (`export_data.py`)
+### 5. Show Team Detail (`show_team.py`)
+
+Shows detailed stats for all players on a specific team, including
+season totals, FGM/FGA/FTM/FTA components, per-game averages, and GP/GL.
+
+```bash
+python show_team.py
+python show_team.py --team-key 466.l.21454.t.1
+```
+
+**What it shows:**
+- Season totals for each player (GP, FGM, FGA, FG%, FTM, FTA, FT%, 3PTM, PTS, REB, AST, STL, BLK, TO, GL)
+- Per-game averages (season total / GP) for each counting stat
+- Team totals and component stats (FGM/FGA, FTM/FTA)
+
+**Use case:** Deep-dive into one team's roster for trade evaluation or projection.
+
+---
+
+### 6. Export Data for AI Analysis (`export_data.py`)
 
 Exports all league data as a single JSON file for AI-assisted trade analysis.
 
@@ -118,6 +136,7 @@ python export_data.py --output my_league.json
 **What it shows:**
 - All teams with full rosters and player season stats
 - Games played and games remaining per player
+- Per-game averages for each counting stat
 - FGM/FGA and FTM/FTA component stats
 - Team totals and stat category metadata
 - Stat ID mapping and negative stat indicators
@@ -126,7 +145,7 @@ python export_data.py --output my_league.json
 
 ---
 
-### 6. Roto Analyzer (`roto_analyzer.py`)
+### 7. Roto Analyzer (`roto_analyzer.py`)
 
 Full Rotisserie league analysis with standings, safety margins, and automated trade suggestions.
 
@@ -158,7 +177,7 @@ python roto_analyzer.py --remaining-games 25 --top-trades 10
 
 ---
 
-### 7. Example API Usage (`example_usage.py`)
+### 8. Example API Usage (`example_usage.py`)
 
 Demonstrates how to use the client library programmatically.
 
