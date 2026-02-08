@@ -334,6 +334,51 @@ class TestShowRostersHelpers(unittest.TestCase):
         self.assertEqual(name, 'Simple Name')
         self.assertEqual(stats, {})
 
+    def test_extract_player_stats_flat_format(self):
+        """yahoo_fantasy_api returns flat dicts with display name keys."""
+        from show_rosters import extract_player_stats
+        reverse_map = {'PTS': '12', 'REB': '15', 'FG%': '5'}
+        player = {
+            'player_id': 6743,
+            'name': 'Test Player',
+            'position_type': 'P',
+            'PTS': 25.0,
+            'REB': 10.0,
+            'FG%': 0.456,
+        }
+        name, stats = extract_player_stats(player, reverse_stat_map=reverse_map)
+        self.assertEqual(name, 'Test Player')
+        self.assertAlmostEqual(stats['12'], 25.0)
+        self.assertAlmostEqual(stats['15'], 10.0)
+        self.assertAlmostEqual(stats['5'], 0.456)
+
+    def test_extract_player_stats_flat_format_no_reverse_map(self):
+        """Without reverse_stat_map, flat format stats are not extracted."""
+        from show_rosters import extract_player_stats
+        player = {
+            'player_id': 6743,
+            'name': 'Test Player',
+            'PTS': 25.0,
+        }
+        name, stats = extract_player_stats(player)
+        self.assertEqual(name, 'Test Player')
+        self.assertEqual(stats, {})
+
+    def test_extract_player_stats_nested_preferred_over_flat(self):
+        """Nested format should be preferred when both are present."""
+        from show_rosters import extract_player_stats
+        reverse_map = {'PTS': '12'}
+        player = {
+            'name': 'Test Player',
+            'player_stats': {
+                'stats': [{'stat_id': '12', 'value': '30.0'}]
+            },
+            'PTS': 25.0,
+        }
+        name, stats = extract_player_stats(player, reverse_stat_map=reverse_map)
+        self.assertEqual(name, 'Test Player')
+        self.assertAlmostEqual(stats['12'], 30.0)
+
 
 if __name__ == '__main__':
     unittest.main()

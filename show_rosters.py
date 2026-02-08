@@ -53,25 +53,28 @@ def build_stat_id_map(stat_categories):
     return stat_map
 
 
-def extract_player_stats(player):
+def extract_player_stats(player, reverse_stat_map=None):
     """
     Extract stats from a player stats response object.
 
-    The Yahoo API nests stats in player_stats -> stats -> stat.
-    This function handles the common response structures.
+    Handles two response formats:
+    1. Nested: player_stats -> stats -> [{stat_id, value}] (raw Yahoo API)
+    2. Flat: stats as top-level keys by display name (yahoo_fantasy_api library)
 
     Args:
         player: Player data dict from the API
+        reverse_stat_map: Optional dict mapping display_name -> stat_id,
+            used to convert flat format keys back to stat IDs.
 
     Returns:
-        tuple: (player_name, player_stats_dict)
+        tuple: (player_name, player_stats_dict keyed by stat_id)
     """
     name = player.get('name', 'Unknown')
     if isinstance(name, dict):
         name = name.get('full', 'Unknown')
 
     stats = {}
-    # Handle different response structures from yahoo_fantasy_api
+    # Handle nested response structures from raw Yahoo API
     player_stats = player.get('player_stats', {})
     if isinstance(player_stats, dict):
         stat_list = player_stats.get('stats', [])
@@ -93,6 +96,14 @@ def extract_player_stats(player):
                     stats[stat_id] = float(value)
                 except (ValueError, TypeError):
                     stats[stat_id] = value
+
+    # Handle flat format from yahoo_fantasy_api library
+    # Stats are directly on the player dict, keyed by display name
+    # (e.g., {'PTS': 25.0, 'REB': 10.0, ...})
+    if not stats and reverse_stat_map:
+        for key, value in player.items():
+            if key in reverse_stat_map and isinstance(value, (int, float)):
+                stats[reverse_stat_map[key]] = value
 
     return name, stats
 
@@ -133,6 +144,17 @@ def main():
 
         if not display_stat_ids:
             display_stat_ids = list(ROTO_STAT_NAMES.keys())
+
+        # Build reverse mapping: display_name -> stat_id for flat API responses
+        reverse_stat_map = {}
+        for sid, dname in stat_id_map.items():
+            reverse_stat_map[dname] = sid
+        for sid, dname in ROTO_STAT_NAMES.items():
+            if dname not in reverse_stat_map:
+                reverse_stat_map[dname] = sid
+        for sid, dname in COMPONENT_STAT_NAMES.items():
+            if dname not in reverse_stat_map:
+                reverse_stat_map[dname] = sid
 
         # Get all teams
         teams = client.get_teams()
@@ -198,8 +220,11 @@ def main():
                     if isinstance(stats_response, list):
                         for ps in stats_response:
                             pkey = ps.get('player_key', '')
-                            pname, pstats = extract_player_stats(ps)
-                            if pkey:
+                            if not pkey:
+                                pkey = ps.get('player_id', '')
+                            pname, pstats = extract_player_stats(
+                                ps, reverse_stat_map)
+                            if pkey and pkey in player_info:
                                 player_season_stats[pkey] = pstats
                             elif pname:
                                 # Try to match by name
@@ -209,7 +234,8 @@ def main():
                                         break
                     elif isinstance(stats_response, dict):
                         for pkey_resp, ps in stats_response.items():
-                            _, pstats = extract_player_stats(ps)
+                            _, pstats = extract_player_stats(
+                                ps, reverse_stat_map)
                             player_season_stats[pkey_resp] = pstats
                 except Exception as e:
                     print(f"     ⚠ Could not fetch player stats: {e}")
