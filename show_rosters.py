@@ -26,7 +26,7 @@ ROTO_STAT_NAMES = {
     '19': 'TO',
 }
 
-# Additional stat IDs used for percentage calculations
+# Component stat IDs
 COMPONENT_STAT_NAMES = {
     '3': 'FGM',
     '4': 'FGA',
@@ -34,13 +34,19 @@ COMPONENT_STAT_NAMES = {
     '7': 'FTA',
 }
 
+# Games played stat
+GP_STAT_ID = '0'
+
+# NBA regular season games per team
+NBA_TOTAL_GAMES = 82
+
 
 def build_stat_id_map(stat_categories):
     """
-    Build a mapping of stat_id to display_name from league settings.
+    Build a mapping of stat_id to display_name from raw API stat categories.
 
     Args:
-        stat_categories: List of stat category dicts from league settings
+        stat_categories: List of stat category dicts from raw API settings
 
     Returns:
         dict: Mapping of stat_id (str) to display_name (str)
@@ -53,48 +59,31 @@ def build_stat_id_map(stat_categories):
     return stat_map
 
 
-def extract_player_stats(player):
+def build_reverse_stat_map(stat_id_map):
     """
-    Extract stats from a player stats response object.
+    Build a reverse mapping: display_name -> stat_id.
 
-    The Yahoo API nests stats in player_stats -> stats -> stat.
-    This function handles the common response structures.
+    Uses the API-provided stat_id_map first, then falls back to
+    hardcoded defaults for any missing entries.
 
     Args:
-        player: Player data dict from the API
+        stat_id_map: dict mapping stat_id -> display_name from API
 
     Returns:
-        tuple: (player_name, player_stats_dict)
+        dict: Mapping of display_name (str) to stat_id (str)
     """
-    name = player.get('name', 'Unknown')
-    if isinstance(name, dict):
-        name = name.get('full', 'Unknown')
-
-    stats = {}
-    # Handle different response structures from yahoo_fantasy_api
-    player_stats = player.get('player_stats', {})
-    if isinstance(player_stats, dict):
-        stat_list = player_stats.get('stats', [])
-    elif isinstance(player_stats, list):
-        stat_list = player_stats
-    else:
-        stat_list = []
-
-    # Also check top-level 'stats' key
-    if not stat_list:
-        stat_list = player.get('stats', [])
-
-    for stat in stat_list:
-        if isinstance(stat, dict):
-            stat_id = str(stat.get('stat_id', ''))
-            value = stat.get('value', '-')
-            if value != '-' and value is not None:
-                try:
-                    stats[stat_id] = float(value)
-                except (ValueError, TypeError):
-                    stats[stat_id] = value
-
-    return name, stats
+    reverse_map = {}
+    for sid, dname in stat_id_map.items():
+        reverse_map[dname] = sid
+    for sid, dname in ROTO_STAT_NAMES.items():
+        if dname not in reverse_map:
+            reverse_map[dname] = sid
+    for sid, dname in COMPONENT_STAT_NAMES.items():
+        if dname not in reverse_map:
+            reverse_map[dname] = sid
+    if 'GP' not in reverse_map:
+        reverse_map['GP'] = GP_STAT_ID
+    return reverse_map
 
 
 def format_stat_value(stat_id, value):
@@ -115,24 +104,27 @@ def main():
         print("Connecting to Yahoo Fantasy Basketball API...")
         client = FantasyBasketballClient()
 
-        print(f"\n{'='*90}")
+        print(f"\n{'='*100}")
         print(f"  Rosters & Player Stats (Season 2025-2026) - League ID: {client.league_id}")
-        print(f"{'='*90}")
+        print(f"{'='*100}")
 
-        # Get league settings for stat category names
-        settings = client.get_league_settings()
-        stat_categories = settings.get('stat_categories', {}).get('stats', [])
-        stat_id_map = build_stat_id_map(stat_categories)
+        # Get raw stat categories with stat_ids from the API
+        raw_categories = client.get_stat_categories_raw()
+        stat_id_map = build_stat_id_map(raw_categories)
+        reverse_stat_map = build_reverse_stat_map(stat_id_map)
 
-        # Determine which stat IDs to display (use league settings or defaults)
-        display_stat_ids = []
-        for cat in stat_categories:
+        # Build Roto stat IDs from API categories (non-display-only stats)
+        roto_stat_ids = []
+        for cat in raw_categories:
             sid = str(cat.get('stat_id', ''))
-            if sid:
-                display_stat_ids.append(sid)
+            is_display_only = str(cat.get('is_only_display_stat', '0'))
+            if sid and is_display_only != '1':
+                roto_stat_ids.append(sid)
+        if not roto_stat_ids:
+            roto_stat_ids = list(ROTO_STAT_NAMES.keys())
 
-        if not display_stat_ids:
-            display_stat_ids = list(ROTO_STAT_NAMES.keys())
+        # Per-player columns: only Roto scoring categories
+        display_stat_ids = list(roto_stat_ids)
 
         # Get all teams
         teams = client.get_teams()
@@ -149,10 +141,10 @@ def main():
 
         # Process each team
         for team_key, team_name in teams.items():
-            print(f"\n{'─'*90}")
+            print(f"\n{'─'*100}")
             print(f"  📋 {team_name}")
             print(f"     Team Key: {team_key}")
-            print(f"{'─'*90}")
+            print(f"{'─'*100}")
 
             # Get roster
             try:
@@ -165,7 +157,7 @@ def main():
                 print("     No players on roster.")
                 continue
 
-            # Collect player keys for batch stat retrieval
+            # Collect player keys/info from roster
             player_keys = []
             player_info = {}
             for player in roster:
@@ -190,27 +182,33 @@ def main():
                         'team': editorial_team,
                     }
 
-            # Fetch season stats for all players on this roster
+            # Fetch season stats via library method (augmented stats_id_map
+            # ensures GP, FGM, FGA, FTM, FTA are included)
             player_season_stats = {}
             if player_keys:
                 try:
-                    stats_response = client.get_players_stats(player_keys, 'season')
+                    stats_response = client.get_players_stats(
+                        player_keys, 'season')
                     if isinstance(stats_response, list):
                         for ps in stats_response:
-                            pkey = ps.get('player_key', '')
-                            pname, pstats = extract_player_stats(ps)
-                            if pkey:
-                                player_season_stats[pkey] = pstats
-                            elif pname:
-                                # Try to match by name
+                            pid = ps.get('player_id', '')
+                            if not pid:
+                                continue
+                            # Convert display-name keys to stat_id keys
+                            pstats = {}
+                            for key, value in ps.items():
+                                if (key in reverse_stat_map
+                                        and isinstance(value, (int, float))):
+                                    pstats[reverse_stat_map[key]] = value
+                            if pid in player_info:
+                                player_season_stats[pid] = pstats
+                            else:
+                                # Try match by name
+                                pname = ps.get('name', '')
                                 for k, v in player_info.items():
                                     if v['name'] == pname:
                                         player_season_stats[k] = pstats
                                         break
-                    elif isinstance(stats_response, dict):
-                        for pkey_resp, ps in stats_response.items():
-                            _, pstats = extract_player_stats(ps)
-                            player_season_stats[pkey_resp] = pstats
                 except Exception as e:
                     print(f"     ⚠ Could not fetch player stats: {e}")
 
@@ -226,12 +224,18 @@ def main():
 
             # Print each player with stats
             team_totals = {}
+            total_gp = 0
             for pkey in player_keys:
                 info = player_info.get(pkey, {})
                 pname = info.get('name', 'Unknown')
                 pos = info.get('position', 'N/A')
                 eteam = info.get('team', '')
                 pstats = player_season_stats.get(pkey, {})
+
+                # Accumulate GP
+                gp = pstats.get(GP_STAT_ID, 0)
+                if isinstance(gp, (int, float)):
+                    total_gp += int(gp)
 
                 row = f"  {pname:<28} {pos:<6} {eteam:<5}"
                 for sid in display_stat_ids:
@@ -241,33 +245,76 @@ def main():
                         # Accumulate totals (skip percentages)
                         if sid not in ('5', '8'):
                             team_totals[sid] = team_totals.get(sid, 0) + (
-                                float(val) if isinstance(val, (int, float)) else 0
+                                float(val)
+                                if isinstance(val, (int, float)) else 0
                             )
+                        # Also accumulate components for percentage recalc
                     else:
                         row += f" {'—':>7}"
                 print(row)
 
+                # Accumulate component stats for team totals
+                for cid in ('3', '4', '6', '7'):
+                    cval = pstats.get(cid)
+                    if cval is not None and isinstance(cval, (int, float)):
+                        team_totals[cid] = team_totals.get(cid, 0) + cval
+
             # Print team totals
-            if team_totals:
-                print(f"  {'─'*28} {'─'*5} {'─'*4}", end="")
-                for _ in stat_headers:
-                    print(f" {'─'*7}", end="")
-                print()
-                totals_row = f"  {'TEAM TOTALS':<28} {'':6} {'':5}"
-                for sid in display_stat_ids:
-                    if sid in ('5', '8'):
-                        totals_row += f" {'—':>7}"
-                    elif sid in team_totals:
-                        totals_row += f" {format_stat_value(sid, team_totals[sid]):>7}"
+            num_players = len(player_keys)
+            total_gl = (num_players * NBA_TOTAL_GAMES) - total_gp
+            print(f"  {'─'*28} {'─'*5} {'─'*4}", end="")
+            for _ in stat_headers:
+                print(f" {'─'*7}", end="")
+            print()
+
+            totals_row = f"  {'TEAM TOTALS':<28} {'':6} {'':5}"
+            for sid in display_stat_ids:
+                if sid == '5':
+                    # Recalculate FG% from FGM/FGA
+                    if '3' in team_totals and '4' in team_totals:
+                        fgm = team_totals['3']
+                        fga = team_totals['4']
+                        pct = fgm / fga if fga > 0 else 0
+                        totals_row += f" {format_stat_value(sid, pct):>7}"
                     else:
                         totals_row += f" {'—':>7}"
-                print(totals_row)
+                elif sid == '8':
+                    # Recalculate FT% from FTM/FTA
+                    if '6' in team_totals and '7' in team_totals:
+                        ftm = team_totals['6']
+                        fta = team_totals['7']
+                        pct = ftm / fta if fta > 0 else 0
+                        totals_row += f" {format_stat_value(sid, pct):>7}"
+                    else:
+                        totals_row += f" {'—':>7}"
+                elif sid in team_totals:
+                    totals_row += (
+                        f" {format_stat_value(sid, team_totals[sid]):>7}")
+                else:
+                    totals_row += f" {'—':>7}"
+            print(totals_row)
 
-        print(f"\n{'='*90}")
+            # Print team GP / GL summary and component stats
+            summary_parts = [f"  Team GP: {total_gp}",
+                             f"GL: {total_gl}"]
+            if '3' in team_totals and '4' in team_totals:
+                summary_parts.append(
+                    f"FGM/FGA: {int(team_totals['3'])}"
+                    f"/{int(team_totals['4'])}")
+            if '6' in team_totals and '7' in team_totals:
+                summary_parts.append(
+                    f"FTM/FTA: {int(team_totals['6'])}"
+                    f"/{int(team_totals['7'])}")
+            print(f"  {'  |  '.join(summary_parts)}")
+
+        print(f"\n{'='*100}")
         print("  Roto Scoring: Teams are ranked 1-N in each category.")
+        print("  GP = total Games Played across all roster slots, "
+              "GL = Games Left")
         print("  Categories: FG%, FT%, 3PTM, PTS, REB, AST, STL, BLK, TO")
-        print("  Reference: https://help.yahoo.com/kb/rotisserie-scoring-sln6187.html")
-        print(f"{'='*90}\n")
+        print("  Reference: https://help.yahoo.com/kb/"
+              "rotisserie-scoring-sln6187.html")
+        print(f"{'='*100}\n")
 
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)

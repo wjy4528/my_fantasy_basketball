@@ -74,6 +74,10 @@ class MockLeagueData:
         roster = self.rosters.get(team_key, [])
         return [p['player_key'] for p in roster]
 
+    def get_active_player_keys(self, team_key):
+        """All mock players are active (non-IL)."""
+        return self.get_team_player_keys(team_key)
+
     def get_stat_name(self, stat_id):
         return self.stat_id_map.get(str(stat_id), f'Stat {stat_id}')
 
@@ -202,11 +206,14 @@ class TestTradeSimulator(unittest.TestCase):
         self.sim = TradeSimulator(self.ld, remaining_games=30)
 
     def test_project_player_ros(self):
-        """ROS projection should multiply averages by remaining games."""
+        """ROS projection should use per-game averages × remaining games."""
+        # Add GP to player stats for per-game average calculation
+        self.ld.player_stats['p1']['0'] = 50.0  # 50 games played
         proj = self.sim.project_player_ros('p1')
-        # p1 averages 25.0 PTS, so ROS = 25.0 * 30 = 750
-        self.assertAlmostEqual(proj['12'], 750.0)
-        self.assertAlmostEqual(proj['15'], 300.0)  # 10.0 * 30
+        # p1: PTS total=25.0, GP=50 → avg=0.5, ROS = 0.5 * 30 = 15.0
+        self.assertAlmostEqual(proj['12'], 25.0 / 50.0 * 30)
+        # p1: REB total=10.0, GP=50 → avg=0.2, ROS = 0.2 * 30 = 6.0
+        self.assertAlmostEqual(proj['15'], 10.0 / 50.0 * 30)
 
     def test_simulate_trade_returns_correct_keys(self):
         """Trade simulation result should contain all expected keys."""
@@ -271,7 +278,8 @@ class TestShowRostersHelpers(unittest.TestCase):
         import types
         cls._mock_modules = {}
         for mod_name in ['yahoo_oauth', 'yahoo_fantasy_api', 'yahoo_fantasy_api.league',
-                         'yahoo_fantasy_api.game', 'yahoo_fantasy_api.team', 'dotenv']:
+                         'yahoo_fantasy_api.game', 'yahoo_fantasy_api.team', 'dotenv',
+                         'objectpath']:
             if mod_name not in sys.modules:
                 cls._mock_modules[mod_name] = sys.modules.get(mod_name)
                 sys.modules[mod_name] = types.ModuleType(mod_name)
@@ -279,6 +287,7 @@ class TestShowRostersHelpers(unittest.TestCase):
         # Add required attributes
         sys.modules['yahoo_oauth'].OAuth2 = MagicMock
         sys.modules['dotenv'].load_dotenv = lambda: None
+        sys.modules['objectpath'].Tree = MagicMock
 
     @classmethod
     def tearDownClass(cls):
@@ -311,28 +320,103 @@ class TestShowRostersHelpers(unittest.TestCase):
         from show_rosters import format_stat_value
         self.assertEqual(format_stat_value('12', 10.5), '10.5')
 
-    def test_extract_player_stats_dict(self):
-        from show_rosters import extract_player_stats
-        player = {
-            'name': {'full': 'Test Player'},
+
+class TestLeagueDataExtractStats(unittest.TestCase):
+    """Test LeagueData._extract_stats and _compute_team_stats."""
+
+    @classmethod
+    def setUpClass(cls):
+        """Mock external modules so league_data can be imported."""
+        import types
+        cls._mock_modules = {}
+        for mod_name in ['yahoo_oauth', 'yahoo_fantasy_api', 'yahoo_fantasy_api.league',
+                         'yahoo_fantasy_api.game', 'yahoo_fantasy_api.team', 'dotenv',
+                         'objectpath']:
+            if mod_name not in sys.modules:
+                cls._mock_modules[mod_name] = sys.modules.get(mod_name)
+                sys.modules[mod_name] = types.ModuleType(mod_name)
+
+        sys.modules['yahoo_oauth'].OAuth2 = MagicMock
+        sys.modules['dotenv'].load_dotenv = lambda: None
+        sys.modules['objectpath'].Tree = MagicMock
+
+    @classmethod
+    def tearDownClass(cls):
+        for mod_name, original in cls._mock_modules.items():
+            if original is None:
+                sys.modules.pop(mod_name, None)
+            else:
+                sys.modules[mod_name] = original
+
+    def _make_ld(self):
+        """Create a LeagueData-like object with reverse_stat_map set."""
+        from league_data import LeagueData
+        ld = LeagueData.__new__(LeagueData)
+        ld.reverse_stat_map = {'PTS': '12', 'REB': '15', 'ST': '17', 'GP': '0'}
+        ld.stat_id_map = {'12': 'PTS', '15': 'REB', '17': 'ST', '0': 'GP'}
+        ld.roto_stat_ids = ['5', '12', '15', '17']
+        ld.negative_stats = set()
+        ld.teams = {'team.1': 'Team A'}
+        ld.rosters = {'team.1': [{'player_id': 101}, {'player_id': 102}]}
+        ld.player_stats = {
+            101: {'0': 50.0, '3': 200.0, '4': 400.0, '5': 0.500,
+                  '12': 500.0, '15': 300.0, '17': 50.0},
+            102: {'0': 40.0, '3': 100.0, '4': 250.0, '5': 0.400,
+                  '12': 300.0, '15': 200.0, '17': 30.0},
+        }
+        ld.player_info = {
+            101: {'name': 'Player A', 'position': 'PG', 'team': 'LAL',
+                  'team_key': 'team.1'},
+            102: {'name': 'Player B', 'position': 'SG', 'team': 'BOS',
+                  'team_key': 'team.1'},
+        }
+        return ld
+
+    def test_flat_format_extraction(self):
+        ld = self._make_ld()
+        player_data = {
+            'player_id': 123,
+            'name': 'Test Player',
+            'PTS': 25.0,
+            'REB': 10.0,
+            'ST': 2.0,
+            'GP': 50.0,
+        }
+        stats = ld._extract_stats(player_data)
+        self.assertAlmostEqual(stats['12'], 25.0)
+        self.assertAlmostEqual(stats['15'], 10.0)
+        self.assertAlmostEqual(stats['17'], 2.0)
+        self.assertAlmostEqual(stats['0'], 50.0)
+
+    def test_nested_format_still_works(self):
+        ld = self._make_ld()
+        player_data = {
             'player_stats': {
                 'stats': [
-                    {'stat_id': '12', 'value': '25.0'},
-                    {'stat_id': '15', 'value': '10'},
+                    {'stat_id': '12', 'value': '30.0'},
                 ]
             }
         }
-        name, stats = extract_player_stats(player)
-        self.assertEqual(name, 'Test Player')
-        self.assertAlmostEqual(stats['12'], 25.0)
-        self.assertAlmostEqual(stats['15'], 10.0)
+        stats = ld._extract_stats(player_data)
+        self.assertAlmostEqual(stats['12'], 30.0)
 
-    def test_extract_player_stats_missing(self):
-        from show_rosters import extract_player_stats
-        player = {'name': 'Simple Name'}
-        name, stats = extract_player_stats(player)
-        self.assertEqual(name, 'Simple Name')
-        self.assertEqual(stats, {})
+    def test_get_active_player_keys_excludes_il(self):
+        """get_active_player_keys should exclude IL/IL+ players."""
+        ld = self._make_ld()
+        ld.rosters = {'team.1': [
+            {'player_id': 101, 'selected_position': {'position': 'PG'}},
+            {'player_id': 102, 'selected_position': {'position': 'IL'}},
+            {'player_id': 103, 'selected_position': {'position': 'IL+'}},
+            {'player_id': 104, 'selected_position': {'position': 'SG'}},
+        ]}
+        active = ld.get_active_player_keys('team.1')
+        self.assertEqual(active, [101, 104])
+
+    def test_get_active_player_keys_all_active(self):
+        """get_active_player_keys returns all when none are IL."""
+        ld = self._make_ld()
+        active = ld.get_active_player_keys('team.1')
+        self.assertEqual(len(active), 2)
 
 
 if __name__ == '__main__':

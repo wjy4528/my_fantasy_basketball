@@ -37,8 +37,8 @@ class TradeSimulator:
         """
         Project a player's rest-of-season (ROS) stats.
 
-        Multiplies season averages by remaining games to estimate
-        the player's remaining contribution.
+        Uses per-game averages (season total / GP) multiplied by
+        remaining games to estimate the player's remaining contribution.
 
         Args:
             player_key: Yahoo player key
@@ -46,14 +46,18 @@ class TradeSimulator:
         Returns:
             dict: {stat_id: projected_remaining_value}
         """
-        averages = self.ld.player_stats.get(player_key, {})
+        stats = self.ld.player_stats.get(player_key, {})
+        gp = stats.get('0', 0)  # GP stat_id = '0'
         projected = {}
-        for stat_id, avg_val in averages.items():
+        for stat_id, total_val in stats.items():
             # For percentage stats, keep as-is (handled via components)
             if stat_id in ('5', '8'):
-                projected[stat_id] = avg_val
+                projected[stat_id] = total_val
+            elif gp > 0:
+                avg = total_val / gp
+                projected[stat_id] = avg * self.remaining_games
             else:
-                projected[stat_id] = avg_val * self.remaining_games
+                projected[stat_id] = 0
         return projected
 
     def simulate_trade(self, my_players, their_players, my_team_key, their_team_key):
@@ -198,12 +202,7 @@ class TradeSimulator:
         """
         Iterate through possible 1-for-1 trades and find the best ones.
 
-        Strategy:
-        - Start with opponents who are strong in categories where
-          my team is weak (using RotoCalculator safety margins).
-        - Simulate all 1-for-1 trades.
-        - Filter: trade must increase MY Roto score.
-        - Prefer: trade also doesn't hurt opponent's score (trade likelihood).
+        Only considers active (non-IL) players for trades.
 
         Args:
             my_team_key: My team's Yahoo key
@@ -212,14 +211,14 @@ class TradeSimulator:
         Returns:
             list of trade result dicts, sorted by my_delta descending
         """
-        my_player_keys = self.ld.get_team_player_keys(my_team_key)
+        my_player_keys = self.ld.get_active_player_keys(my_team_key)
         all_trades = []
 
         for opp_team_key in self.ld.teams:
             if opp_team_key == my_team_key:
                 continue
 
-            opp_player_keys = self.ld.get_team_player_keys(opp_team_key)
+            opp_player_keys = self.ld.get_active_player_keys(opp_team_key)
 
             for my_pk in my_player_keys:
                 for their_pk in opp_player_keys:
