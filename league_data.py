@@ -63,6 +63,14 @@ class LeagueData:
         self.player_stats = {}
         self.player_info = {}
 
+    @staticmethod
+    def _get_player_key(player):
+        """Get the player key from a player dict, falling back to player_id."""
+        pkey = player.get('player_key', '')
+        if not pkey:
+            pkey = player.get('player_id', '')
+        return pkey
+
     def fetch_all(self):
         """Fetch all data from the API in sequence."""
         self.fetch_settings()
@@ -159,9 +167,7 @@ class LeagueData:
                 self.rosters[team_key] = roster
 
                 for player in roster:
-                    pkey = player.get('player_key', '')
-                    if not pkey:
-                        pkey = player.get('player_id', '')
+                    pkey = self._get_player_key(player)
                     if not pkey:
                         continue
                     pname = player.get('name', 'Unknown')
@@ -200,9 +206,7 @@ class LeagueData:
                 stats_response = self.client.get_players_stats(player_keys, 'season')
                 if isinstance(stats_response, list):
                     for ps in stats_response:
-                        pkey = ps.get('player_key', '')
-                        if not pkey:
-                            pkey = ps.get('player_id', '')
+                        pkey = self._get_player_key(ps)
                         pstats = self._extract_stats(ps)
                         if pkey:
                             self.player_stats[pkey] = pstats
@@ -263,9 +267,7 @@ class LeagueData:
         roster = self.rosters.get(team_key, [])
         keys = []
         for p in roster:
-            pkey = p.get('player_key', '')
-            if not pkey:
-                pkey = p.get('player_id', '')
+            pkey = self._get_player_key(p)
             if pkey:
                 keys.append(pkey)
         return keys

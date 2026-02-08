@@ -157,6 +157,14 @@ def format_stat_value(stat_id, value):
     return str(value)
 
 
+def _get_display_name(stat_id, stat_id_map):
+    """Get the display name for a stat_id with fallback chain."""
+    return stat_id_map.get(stat_id,
+                           ROTO_STAT_NAMES.get(stat_id,
+                           COMPONENT_STAT_NAMES.get(stat_id,
+                           GP_DISPLAY_NAME if stat_id == GP_STAT_ID else f'S{stat_id}')))
+
+
 def main():
     """Display rosters for all managers with player season stats."""
     try:
@@ -206,11 +214,7 @@ def main():
         # Build stat header using API display names
         stat_headers = []
         for sid in display_stat_ids:
-            name = stat_id_map.get(sid,
-                                   ROTO_STAT_NAMES.get(sid,
-                                   COMPONENT_STAT_NAMES.get(sid,
-                                   GP_DISPLAY_NAME if sid == GP_STAT_ID else f'S{sid}')))
-            stat_headers.append(name)
+            stat_headers.append(_get_display_name(sid, stat_id_map))
 
         # Process each team
         for team_key, team_name in teams.items():
