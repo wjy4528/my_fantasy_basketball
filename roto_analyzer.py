@@ -44,8 +44,11 @@ def select_my_team(league_data):
             idx = int(choice) - 1
             if 0 <= idx < len(teams):
                 return teams[idx][0]
-        except (ValueError, EOFError):
+        except ValueError:
             pass
+        except EOFError:
+            print("\nError: No interactive input available. Use --team-key to specify your team.")
+            sys.exit(1)
         print("Invalid selection. Please try again.")
 
 
