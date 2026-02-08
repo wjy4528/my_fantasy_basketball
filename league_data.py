@@ -132,31 +132,24 @@ class LeagueData:
 
     def fetch_standings(self):
         """
-        Fetch current standings and extract raw stat totals for all teams.
+        Fetch current standings and team season stat totals from the API.
 
-        Populates self.teams and self.team_stats with current season totals.
+        Uses the ``teams/stats`` endpoint which returns cumulative season
+        stat totals (including FG% and FT%) directly from Yahoo, so we
+        don't need to compute them ourselves.
+
+        Populates self.teams and self.team_stats.
         """
         self.standings_raw = self.client.get_standings()
         self.teams = {}
-        self.team_stats = {}
 
         for team in self.standings_raw:
             team_key = team.get('team_key', '')
             team_name = team.get('name', 'Unknown')
             self.teams[team_key] = team_name
 
-            # Extract stats
-            stats = {}
-            stat_list = team.get('team_stats', {}).get('stats', [])
-            for stat in stat_list:
-                stat_id = str(stat.get('stat_id', ''))
-                value = stat.get('value', '-')
-                if value != '-' and value is not None:
-                    try:
-                        stats[stat_id] = float(value)
-                    except (ValueError, TypeError):
-                        pass
-            self.team_stats[team_key] = stats
+        # Get team stats directly from the API (includes FG%, FT%, etc.)
+        self.team_stats = self.client.get_all_teams_stats()
 
     def fetch_rosters(self):
         """
@@ -204,7 +197,9 @@ class LeagueData:
         FGA, FTM, FTA keyed by display name.
 
         Populates self.player_stats with {player_id: {stat_id: value}}.
-        After fetching, computes team_stats by summing player totals.
+
+        Note: team_stats are fetched separately from the API in
+        fetch_standings(), so this method does NOT overwrite them.
         """
         self.player_stats = {}
 
@@ -232,9 +227,6 @@ class LeagueData:
                 team_name = self.teams.get(team_key, team_key)
                 print(f"  Warning: Could not fetch player stats "
                       f"for {team_name}: {e}")
-
-        # Compute team totals from player data
-        self._compute_team_stats()
 
     def _extract_stats(self, player_data):
         """
@@ -280,35 +272,6 @@ class LeagueData:
 
         return stats
 
-    def _compute_team_stats(self):
-        """
-        Compute team stat totals by summing each player's season stats.
-
-        For percentage stats (FG%, FT%), recalculates from components
-        (FGM/FGA, FTM/FTA) instead of averaging.
-        """
-        self.team_stats = {}
-        for team_key in self.teams:
-            player_keys = self.get_team_player_keys(team_key)
-            totals = {}
-            for pkey in player_keys:
-                pstats = self.player_stats.get(pkey, {})
-                for stat_id, val in pstats.items():
-                    if isinstance(val, (int, float)):
-                        # Skip percentage stats — recalculate from components
-                        if stat_id in ('5', '8'):
-                            continue
-                        totals[stat_id] = totals.get(stat_id, 0) + val
-
-            # Recalculate FG% from FGM/FGA
-            if '3' in totals and '4' in totals and totals['4'] > 0:
-                totals['5'] = totals['3'] / totals['4']
-            # Recalculate FT% from FTM/FTA
-            if '6' in totals and '7' in totals and totals['7'] > 0:
-                totals['8'] = totals['6'] / totals['7']
-
-            self.team_stats[team_key] = totals
-
     def get_team_player_keys(self, team_key):
         """Get all player keys for a given team."""
         roster = self.rosters.get(team_key, [])
@@ -317,6 +280,27 @@ class LeagueData:
             pkey = self._get_player_key(p)
             if pkey:
                 keys.append(pkey)
+        return keys
+
+    def get_active_player_keys(self, team_key):
+        """Get player keys for active (non-IL) players on a team.
+
+        Excludes players whose ``selected_position`` is IL, IL+, or DL.
+        These players should not be counted for future stat projections.
+        """
+        roster = self.rosters.get(team_key, [])
+        keys = []
+        for p in roster:
+            pkey = self._get_player_key(p)
+            if not pkey:
+                continue
+            pos = p.get('selected_position', '')
+            if isinstance(pos, dict):
+                pos = pos.get('position', '')
+            pos = str(pos).upper()
+            if pos in ('IL', 'IL+', 'DL'):
+                continue
+            keys.append(pkey)
         return keys
 
     def get_stat_name(self, stat_id):

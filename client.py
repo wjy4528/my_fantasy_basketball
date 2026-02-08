@@ -222,6 +222,38 @@ class FantasyBasketballClient:
                 results.append(row)
         return results
 
+    def get_all_teams_stats(self):
+        """
+        Get season stats for ALL teams directly from the Yahoo API.
+
+        Uses the ``league/{league_key}/teams/stats`` endpoint which
+        returns cumulative season stat totals for every team.  This
+        is more reliable than computing from player data because the
+        API handles FG%/FT% correctly.
+
+        Returns:
+            dict: ``{team_key: {stat_id_str: float_value}}``
+        """
+        raw = self.lg.yhandler.get(
+            "league/{}/teams/stats".format(self.lg.league_id))
+        t = objectpath.Tree(raw)
+        result = {}
+        team_key = None
+        for e in t.execute('$..(team_key,stat)'):
+            if 'team_key' in e:
+                team_key = e['team_key']
+                if team_key not in result:
+                    result[team_key] = {}
+            elif 'stat' in e and team_key is not None:
+                sid = str(e['stat'].get('stat_id', ''))
+                val_str = e['stat'].get('value', '')
+                if sid and val_str not in ('', '-', None):
+                    try:
+                        result[team_key][sid] = float(val_str)
+                    except (ValueError, TypeError):
+                        pass
+        return result
+
     def get_all_players(self):
         """
         Get all available players in the league.

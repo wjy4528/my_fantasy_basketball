@@ -74,6 +74,10 @@ class MockLeagueData:
         roster = self.rosters.get(team_key, [])
         return [p['player_key'] for p in roster]
 
+    def get_active_player_keys(self, team_key):
+        """All mock players are active (non-IL)."""
+        return self.get_team_player_keys(team_key)
+
     def get_stat_name(self, stat_id):
         return self.stat_id_map.get(str(stat_id), f'Stat {stat_id}')
 
@@ -202,11 +206,14 @@ class TestTradeSimulator(unittest.TestCase):
         self.sim = TradeSimulator(self.ld, remaining_games=30)
 
     def test_project_player_ros(self):
-        """ROS projection should multiply averages by remaining games."""
+        """ROS projection should use per-game averages × remaining games."""
+        # Add GP to player stats for per-game average calculation
+        self.ld.player_stats['p1']['0'] = 50.0  # 50 games played
         proj = self.sim.project_player_ros('p1')
-        # p1 averages 25.0 PTS, so ROS = 25.0 * 30 = 750
-        self.assertAlmostEqual(proj['12'], 750.0)
-        self.assertAlmostEqual(proj['15'], 300.0)  # 10.0 * 30
+        # p1: PTS total=25.0, GP=50 → avg=0.5, ROS = 0.5 * 30 = 15.0
+        self.assertAlmostEqual(proj['12'], 25.0 / 50.0 * 30)
+        # p1: REB total=10.0, GP=50 → avg=0.2, ROS = 0.2 * 30 = 6.0
+        self.assertAlmostEqual(proj['15'], 10.0 / 50.0 * 30)
 
     def test_simulate_trade_returns_correct_keys(self):
         """Trade simulation result should contain all expected keys."""
@@ -393,35 +400,23 @@ class TestLeagueDataExtractStats(unittest.TestCase):
         stats = ld._extract_stats(player_data)
         self.assertAlmostEqual(stats['12'], 30.0)
 
-    def test_compute_team_stats_sums_players(self):
-        """team_stats should be sum of player season totals."""
+    def test_get_active_player_keys_excludes_il(self):
+        """get_active_player_keys should exclude IL/IL+ players."""
         ld = self._make_ld()
-        ld._compute_team_stats()
-        ts = ld.team_stats['team.1']
-        # PTS: 500 + 300 = 800
-        self.assertAlmostEqual(ts['12'], 800.0)
-        # REB: 300 + 200 = 500
-        self.assertAlmostEqual(ts['15'], 500.0)
-        # ST: 50 + 30 = 80
-        self.assertAlmostEqual(ts['17'], 80.0)
+        ld.rosters = {'team.1': [
+            {'player_id': 101, 'selected_position': {'position': 'PG'}},
+            {'player_id': 102, 'selected_position': {'position': 'IL'}},
+            {'player_id': 103, 'selected_position': {'position': 'IL+'}},
+            {'player_id': 104, 'selected_position': {'position': 'SG'}},
+        ]}
+        active = ld.get_active_player_keys('team.1')
+        self.assertEqual(active, [101, 104])
 
-    def test_compute_team_stats_recalculates_fg_pct(self):
-        """FG% should be recalculated from FGM/FGA, not averaged."""
+    def test_get_active_player_keys_all_active(self):
+        """get_active_player_keys returns all when none are IL."""
         ld = self._make_ld()
-        ld._compute_team_stats()
-        ts = ld.team_stats['team.1']
-        # FGM: 200 + 100 = 300, FGA: 400 + 250 = 650
-        # FG% = 300 / 650 ≈ 0.4615
-        expected_fg = 300.0 / 650.0
-        self.assertAlmostEqual(ts['5'], expected_fg, places=4)
-
-    def test_compute_team_stats_sums_gp(self):
-        """GP should be summed across all players."""
-        ld = self._make_ld()
-        ld._compute_team_stats()
-        ts = ld.team_stats['team.1']
-        # GP: 50 + 40 = 90
-        self.assertAlmostEqual(ts['0'], 90.0)
+        active = ld.get_active_player_keys('team.1')
+        self.assertEqual(len(active), 2)
 
 
 if __name__ == '__main__':
