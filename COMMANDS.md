@@ -83,7 +83,57 @@ python suggest_trades.py
 
 ---
 
-### 4. Example API Usage (`example_usage.py`)
+### 4. Show Rosters (`show_rosters.py`)
+
+Displays every manager's roster with player season stats for 2025-2026.
+
+```bash
+python show_rosters.py
+```
+
+**What it shows:**
+- All teams and their full rosters
+- Each player's position and NBA team
+- Season total stats per Roto category (FG%, FT%, 3PTM, PTS, REB, AST, STL, BLK, TO)
+- Team totals per category (excluding percentage stats)
+
+**Use case:** Quick overview of every roster's composition and statistical output. Essential for evaluating trade targets.
+
+---
+
+### 5. Roto Analyzer (`roto_analyzer.py`)
+
+Full Rotisserie league analysis with standings, safety margins, and automated trade suggestions.
+
+```bash
+python roto_analyzer.py
+python roto_analyzer.py --team-key 428.l.21454.t.1
+python roto_analyzer.py --remaining-games 25 --top-trades 10
+```
+
+**Options:**
+- `--team-key`: Your team key (prompted interactively if omitted)
+- `--remaining-games`: Estimated remaining games per player (default: 30)
+- `--top-trades`: Number of trade suggestions to display (default: 5)
+
+**What it shows:**
+- Roto Standings: Full table with per-category rank points and total Roto score
+- Standings Gaps: How many units you need to gain/lose to move up/down one rank
+- Safety Margins: Categories where you have a comfortable lead
+- Top Trade Suggestions: 1-for-1 trades ranked by Roto score improvement
+- Mutual Benefit Flag: Whether the trade also helps the opponent (trade likelihood)
+- Pandas DataFrame output for easy analysis
+
+**Architecture:**
+- `LeagueData` class (`league_data.py`): Fetches settings, standings, rosters, player stats
+- `RotoCalculator` class (`roto_calculator.py`): Rankings, Roto scores, gaps, safety margins
+- `TradeSimulator` class (`trade_simulator.py`): Projects ROS stats, simulates trades, handles FG%/FT% via component stats
+
+**Use case:** Data-driven trade planning that maximizes your Roto standing by leveraging safety margins to improve categories where you're close to overtaking the next rank.
+
+---
+
+### 6. Example API Usage (`example_usage.py`)
 
 Demonstrates how to use the client library programmatically.
 

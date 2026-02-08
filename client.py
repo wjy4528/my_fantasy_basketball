@@ -103,6 +103,34 @@ class FantasyBasketballClient:
         """
         return self.lg.settings()
     
+    def get_player_stats(self, player_key, req_type='season'):
+        """
+        Get stats for a specific player.
+
+        Args:
+            player_key: Yahoo player key
+            req_type: Type of stats request ('season' for season totals)
+
+        Returns:
+            dict: Player statistics
+        """
+        return self.lg.player_stats([player_key], req_type)
+
+    def get_players_stats(self, player_keys, req_type='season'):
+        """
+        Get stats for multiple players.
+
+        Args:
+            player_keys: List of Yahoo player keys
+            req_type: Type of stats request ('season' for season totals)
+
+        Returns:
+            list: List of player statistics
+        """
+        if not player_keys:
+            return []
+        return self.lg.player_stats(player_keys, req_type)
+
     def get_all_players(self):
         """
         Get all available players in the league.
